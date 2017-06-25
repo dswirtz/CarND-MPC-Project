@@ -1,1 +1,4 @@
+Reflection - Douglas Wirtz
+June 25th, 2017
 
+My implementation for this project used the quiz solutions from the lectures for inspiration. I first put the current state {px, py, psi, v} into a vector `currentstate` and the actuators {delta (steering_angle), a (throttle)} into a vector `actuators`. I used these two vectors in the globalKinematic function to predict the next state which is in a vector `next_state`. This vector's main purpose was to help with the latency. This idea was to predict the car's postion, and pass the `dt` variable into the MPC. I used the px, py, and psi from the `next_vector` variable to coefficients, `coeffs`, via `polyfit()`. Once the `coeffs` are calculated, I can calculate the `cte` and `epsi` to finish the state vector (px, py, psi, next_state.v, cte, epsi) for the MPC, `state << 0.0, 0.0, 0.0, next_state[3], cte, epsi`.
