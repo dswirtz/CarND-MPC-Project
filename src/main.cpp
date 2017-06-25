@@ -65,6 +65,36 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
   return result;
 }
 
+const double Lf = 2.67;
+// Return the next state.
+//
+// NOTE: state is [x, y, psi, v]
+// NOTE: actuators is [delta, a]
+Eigen::VectorXd globalKinematic(Eigen::VectorXd state,
+                                Eigen::VectorXd actuators, double dt) {
+  // Create a new vector for the next state.
+  Eigen::VectorXd next_state(state.size());
+
+  auto x = state(0);
+  auto y = state(1);
+  auto psi = state(2);
+  auto v = state(3);
+
+  auto delta = actuators(0);
+  auto a = actuators(1);
+
+  // Recall the equations for the model:
+  // x_[t+1] = x[t] + v[t] * cos(psi[t]) * dt
+  // y_[t+1] = y[t] + v[t] * sin(psi[t]) * dt
+  // psi_[t+1] = psi[t] + v[t] / Lf * delta[t] * dt
+  // v_[t+1] = v[t] + a[t] * dt
+  next_state(0) = x + v * cos(psi) * dt;
+  next_state(1) = y + v * sin(psi) * dt;
+  next_state(2) = psi + v / Lf * delta * dt;
+  next_state(3) = v + a * dt;
+  return next_state;
+}
+
 int main() {
   uWS::Hub h;
 
@@ -91,15 +121,58 @@ int main() {
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+		  v = v*0.447; // convert to m/s
+		  
+		  double delta = j[1]["steering_angle"];
+		  double a = j[1]["throttle"];
 
+		  
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+		  
+		  // Create vector equal to the size of ptsx/ptsy
+		  vector<double> nxt_xvals(ptsx.size());
+          vector<double> nxt_yvals(ptsy.size());
+		  
+		  // [x, y, psi, v]
+		  Eigen::VectorXd currentstate(4);
+		  currentstate << px, py, psi, v;
+		  
+		  // [delta, a]
+		  Eigen::VectorXd actuators(2);
+		  actuators << delta, a;
+		  
+		  Eigen::VectorXd next_state = globalKinematic(currentstate, actuators, 0.1);
+		  
+		  for (int i = 0; i < ptsx.size(); i++) {
+			double map_x = ptsx[i] - next_state[0];
+			double map_y = ptsy[i] - next_state[1];
+			double cos_psi = cos(next_state[2]);
+			double sin_psi = sin(next_state[2]);
+			nxt_xvals[i] = map_x * cos_psi + map_y * sin_psi;
+			nxt_yvals[i] = -map_x * sin_psi + map_y * cos_psi;
+		  }
+		  
+		  // Pass the x and y waypoint coordinates along the order of the polynomial.
+		  // In this case, 3.
+          Eigen::Map<Eigen::VectorXd> xvals(&nxt_xvals[0], nxt_xvals.size());
+          Eigen::Map<Eigen::VectorXd> yvals(&nxt_yvals[0], nxt_yvals.size());
+		  auto coeffs = polyfit(xvals, yvals, 3);
+		  
+		  double cte = polyeval(coeffs, 0);
+		  double epsi = -atan(coeffs[1]);
+		  
+		  Eigen::VectorXd state(6);
+          state << 0.0, 0.0, 0.0, next_state[3], cte, epsi;
+		  
+		  auto solution = mpc.Solve(state, coeffs);
+		  
+          double steer_value = -solution[6];
+          double throttle_value = solution[7];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -108,8 +181,8 @@ int main() {
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          vector<double> mpc_x_vals = mpc.x_vals;
+          vector<double> mpc_y_vals = mpc.y_vals;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -118,8 +191,8 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals = nxt_xvals;
+          vector<double> next_y_vals = nxt_yvals;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
